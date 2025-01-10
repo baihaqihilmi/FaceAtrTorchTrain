@@ -5,12 +5,11 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 from torchvision import datasets, transforms
 from torch.utils.data import random_split
 import argparse
-from models.model import Model
+from models.model import MyModel
 from torch import optim
 from torch import nn
-
-
-
+from data.dataset import UTKDataset
+import os.path as osp
 ##TODO Create a pipeline for both Age and Gender Classification
 ##1 .  Fine tuned model from VGG-Face in Torch 
 ##2. Conevert the model to ONNX
@@ -21,12 +20,15 @@ from torch import nn
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Age and Gender Classification Training')
-    parser.add_argument('--data_path', type=str, required=True, help='Path to the dataset')
     parser.add_argument('--num_epochs', type=int, default=10, help='Number of epochs for training')
-    parser.add_argument('--learning_rate', type=float, default=0.001, help='Learning rate for the optimizer')
-    parser.add_argument('--batch_size', type=int, default=32, help='Batch size for training and validation')
+    parser.add_argument('--learning_rate', type=float, default=0.05, help='Learning rate for the optimizer')
+    parser.add_argument('--batch_size', type=int, default=4, help='Batch size for training and validation')
     parser.add_argument('--model_path', type=str, default='model.pth', help='Path to save the trained model')
+    ## Input Image
+    parser.add_argument('--model_name', type=str, default='resnet50', help='Name of the model to use for training')
+    parser.add_argument('--img_size', type=int, nargs=2, default=[224, 224], help='Input image size')
     return parser.parse_args()
+
 
 def main():
     args = parse_args()
@@ -37,7 +39,7 @@ def main():
     batch_size = args.batch_size
 
     # Device configuration
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = 'cpu'
 
     # Data preprocessing
     transform = transforms.Compose([
@@ -47,28 +49,28 @@ def main():
     ])
 
     # Load dataset
-    dataset = datasets.ImageFolder(root=args.data_path, transform=transform)
-    train_size = int(0.8 * len(dataset))
-    val_size = len(dataset) - train_size
-    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+    datasets = UTKDataset(root_dir=osp.join('data', 'archive', 'UTKFace') , transform= transform)
+    train_size = int(0.8 * len(datasets))
+    val_size = len(datasets) - train_size
+    train_dataset, val_dataset = random_split(datasets, [train_size, val_size])
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
     # Model, criterion, optimizer
-    model = Model()  # Replace with your model
+    model = MyModel(args)  # Replace with your model
     model = model.to(device)
     criterion = {
         "Age": nn.MSELoss(),
-        "Gender": nn.CrossEntropyLoss(),
+        "Gender": nn.BCEWithLogitsLoss(),
         "Race": nn.CrossEntropyLoss(),
     }
     optimizers = {
         "Age": optim.SGD(model.parameters(), lr=learning_rate),  # Adam optimizer for some part of the model
-        "Gender": optim.SGD(model.parameters(), lr=learning_rate, momentum=0.9),  # SGD optimizer for another part
-        "Race": optim.SGD(model.parameters(), lr=learning_rate, momentum=0.9)  # SGD optimizer for another part
+        "Gender": optim.SGD(model.parameters(), lr=learning_rate),  # SGD optimizer for another part
+        "Race": optim.SGD(model.parameters(), lr=learning_rate)  # SGD optimizer for another part
     }
-
+    model = model.to(device)
     # Train and validate the model
     train(model, train_loader, val_loader, criterion, optimizers, num_epochs, device)
 
@@ -85,7 +87,11 @@ def train(model, train_loader, val_loader, criterion, optimizers, num_epochs, de
         }
 
         for inputs, labels in train_loader:
-            inputs, labels = inputs.to(device), labels.to(device)
+            inputs = inputs.to(device)
+            for k,v in labels.items(): 
+                labels[k] = v.to(device)
+
+    
 
             for k, v in running_loss.items():
                 optimizers[k].zero_grad()
@@ -93,7 +99,11 @@ def train(model, train_loader, val_loader, criterion, optimizers, num_epochs, de
             outputs = model(inputs)
 
             for k, v in running_loss.items():
-                loss = criterion[k](outputs[k], labels[k])  # Assuming labels are dictionaries with keys 'Age', 'Gender', etc.
+                if k == "Age" or k == "Gender":
+                    loss = criterion[k](outputs[k].squeeze(), labels[k])  # Assuming labels are dictionaries with keys 'Age', 'Gender', etc.
+                else : 
+                    loss = criterion[k](outputs[k], labels[k].long())  # Assuming labels are dictionaries with keys 'Age', 'Gender', etc.
+
                 running_loss[k] += loss.item()
                 optimizers[k].step()
 
@@ -167,3 +177,8 @@ def validate(model, val_loader, criterion, device):
         race_f1 = f1_score(race_labels, race_outputs.argmax(dim=1), average='weighted')
 
         print(f"Race - Accuracy: {race_accuracy*100}%, Precision: {race_precision}, Recall: {race_recall}, F1: {race_f1}")
+
+
+
+if __name__ == "__main__":
+    main()
