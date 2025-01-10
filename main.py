@@ -10,13 +10,13 @@ from torch import optim
 from torch import nn
 from data.dataset import UTKDataset
 import os.path as osp
+from tqdm import tqdm  # Import tqdm
+
 ##TODO Create a pipeline for both Age and Gender Classification
 ##1 .  Fine tuned model from VGG-Face in Torch 
 ##2. Conevert the model to ONNX
 ## Convert the model to OpenVINO
 ##2 . INference The Model 
-
-
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Age and Gender Classification Training')
@@ -28,7 +28,6 @@ def parse_args():
     parser.add_argument('--model_name', type=str, default='resnet50', help='Name of the model to use for training')
     parser.add_argument('--img_size', type=int, nargs=2, default=[224, 224], help='Input image size')
     return parser.parse_args()
-
 
 def main():
     args = parse_args()
@@ -86,12 +85,10 @@ def train(model, train_loader, val_loader, criterion, optimizers, num_epochs, de
             "Race": 0
         }
 
-        for inputs, labels in train_loader:
+        for inputs, labels in tqdm(train_loader, desc=f"Training Epoch {epoch+1}/{num_epochs}"):
             inputs = inputs.to(device)
             for k,v in labels.items(): 
                 labels[k] = v.to(device)
-
-    
 
             for k, v in running_loss.items():
                 optimizers[k].zero_grad()
@@ -134,7 +131,7 @@ def validate(model, val_loader, criterion, device):
     }
 
     with torch.no_grad():
-        for inputs, labels in val_loader:
+        for inputs, labels in tqdm(val_loader, desc="Validation"):
             inputs, labels = inputs.to(device), labels.to(device)
 
             outputs = model(inputs)
@@ -177,8 +174,6 @@ def validate(model, val_loader, criterion, device):
         race_f1 = f1_score(race_labels, race_outputs.argmax(dim=1), average='weighted')
 
         print(f"Race - Accuracy: {race_accuracy*100}%, Precision: {race_precision}, Recall: {race_recall}, F1: {race_f1}")
-
-
 
 if __name__ == "__main__":
     main()
